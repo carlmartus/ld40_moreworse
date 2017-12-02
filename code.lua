@@ -5,7 +5,7 @@
 -- input:  mouse
 
 --{{{ HEADER
-cash = 200
+cash = 300
 mpress = false
 mhold = false
 mx = 0
@@ -14,13 +14,6 @@ t = 0
 fiscal = 0
 house = {152, 72}
 cb_ui = nil
-guard_count = 0
-
-rect_invest_btn = {10, 120, 40, 8}
-
-rect_buy_area = {10, 10, 90, 80}
-rect_buy_guard_btn = {15, 25, 80, 8}
-rect_buy_back_btn = {15, 70, 30, 8}
 
 actor_type_bandit = 1
 actor_type_guard = 2
@@ -33,7 +26,7 @@ function actor_add(type, tic, x, y)
 	actor = {
 		type=type,
 		tic=tic,
-		spr=0,
+		spr=0, spr_rot=0, spr_flip=0,
 		x=x, y=y,
 		next_tic=0,
 		dead=false,
@@ -61,14 +54,14 @@ function tic_actors()
 		end
 
 		if draw then
-			spr(a.spr, a.x, a.y, 0)
+			spr(a.spr, a.x, a.y, 0, 1, a.spr_flip, a.spr_rot)
 		end
 	end
 end
 --}}}
 --{{{ BANDITS
-bandit_next = 100
-bandit_timer = 0
+bandit_next = 400
+bandit_timer = 300
 bandit_waves = 0
 
 function bandit_new(x, y)
@@ -112,15 +105,22 @@ function bandit_hit(a, damage)
 		a.dead = true
 		a.next_tic = 120
 		a.spr = 275
-		trace("DEAD")
+		a.spr_rot = math.floor(math.random()*3.999)
+		a.spr_flip = math.floor(math.random()*3.999)
 	end
 end
 
 function bandit_wave()
 	bandit_waves = bandit_waves+1
 
+	local y_start = -6
+	if (bandit_waves // 2) % 2 == 1 then
+		y_start = 134
+	end
+
 	for i = 1, bandit_waves do
-		bandit_new(5 + 8*i, 5)
+		local x_start = math.random() * 240
+		bandit_new(x_start, y_start)
 	end
 end
 
@@ -128,9 +128,19 @@ function bandit_tic()
 	bandit_timer = bandit_timer+1
 
 	if bandit_timer >= bandit_next then
-		--bandit_next =
 		bandit_timer = 0
 		bandit_wave()
+		return true
+	end
+
+	return false
+end
+
+function bandit_clear()
+	for i, a in ipairs(actors) do
+		if a.type == actor_type_bandit then
+			--table.delete(actors, i)
+		end
 	end
 end
 --}}}
@@ -154,12 +164,16 @@ function lines_add(x0, y0, x1, y1, col, duration)
 end
 --}}}
 --{{{ GUARD ACTOR
+guard_count = 0
+guard_range = 90
+guard_rate = 25
+
 function guard_new(x, y)
 	local a = actor_add(actor_type_guard, function(a)
 		a.autoturn = a.autoturn-1
 
 		if guard_attack(a) then
-			return 30
+			return guard_rate + math.floor(math.random()*10)
 		elseif a.autoturn <= 0 then
 			a.autoturn = 3 + math.floor(math.random()*2)
 
@@ -190,28 +204,40 @@ function guard_attack(g)
 		if a.type == actor_type_bandit and a.dead == false then
 			local dx = a.x - g.x
 			local dy = a.y - g.y
-			--local angle = (4 - math.floor(
-			--2 * (math.atan2(dx, dy) + math.pi))) % 8
-			local angle = math.atan2(dx, dy) + math.pi
-			local frame_id = (4- math.floor(
-			8.0*angle / (math.pi*2)))%8
 
-			local dist_inv = 1.0 / math.sqrt(dx*dx + dy*dy)
+			if math.abs(dx)+math.abs(dy) < guard_range then
+				--local angle = (4 - math.floor(
+				--2 * (math.atan2(dx, dy) + math.pi))) % 8
+				local angle = math.atan2(dx, dy) + math.pi
+				local frame_id = (4- math.floor(
+				8.0*angle / (math.pi*2)))%8
 
-			lines_add(
-				g.x+4 + dx*dist_inv*5,
-				g.y+4 + dy*dist_inv*5,
-				a.x+4,
-				a.y+4,
-				9, 5)
-			bandit_hit(a, 1)
+				local dist_inv = 1.0 / math.sqrt(dx*dx + dy*dy)
 
-			g.spr = 256 + frame_id
-			return true
+				lines_add(
+					g.x+4 + dx*dist_inv*5,
+					g.y+4 + dy*dist_inv*5,
+					a.x+4,
+					a.y+4,
+					9, 5)
+				sfx(1)
+				bandit_hit(a, 1)
+
+				g.spr = 256 + frame_id
+				return true
+			end
 		end
 	end
 
 	return false
+end
+
+function guard_upgrade_range()
+	guard_range = guard_range+20
+end
+
+function guard_upgrade_rate()
+	guard_rate = guard_rate-10
 end
 
 function guard_get_at(x, y)
@@ -249,11 +275,15 @@ function draw_meny()
 	rect(200, 0, 120, 136, 15)
 end
 
-function draw_button(r, text)
+function draw_button(r, text, afford)
 	local x1 = r[1] + r[3]
 	local y1 = r[2] + r[4]
 
-	local line_color = 6
+	local line_color = 8
+	if afford == false then
+		line_color = 6
+	end
+
 	local mouse_in = mouse_in_rect(r)
 	if mouse_in then
 		line_color = 11
@@ -268,8 +298,26 @@ function draw_button(r, text)
 
 	return mouse_in and mpress
 end
+
+function invest_button(id, cost, text)
+	local r = {15, 25 + id*10, 90, 8}
+	local afford = cash-cost >= 0
+	if draw_button(r, text, afford) and afford then
+		cash = cash-cost
+		return true
+	else
+		return false
+	end
+end
 --}}}
 --{{{ UI
+rect_invest_btn = {10, 120, 40, 8}
+
+rect_buy_area = {10, 10, 100, 100}
+rect_buy_guard_btn = {15, 25, 90, 8}
+rect_buy_tower_btn = {15, 35, 90, 8}
+rect_buy_back_btn = {15, 70, 30, 8}
+
 function ui_normal()
 	draw_cash()
 	local press = draw_button(rect_invest_btn, "INVEST")
@@ -284,8 +332,25 @@ function ui_invest()
 	draw_shadow_text("Investors menu", 13, 13, 14)
 	draw_cash()
 
-	if draw_button(rect_buy_guard_btn, "GUARD (50 + 40X)") then
+	if invest_button(0, 30, "GUARD (30 + 40X)") then
 		cb_ui = ui_place_guard
+	end
+
+	if invest_button(1, 400, "EXTRA TOWER (400)") then
+		build_tower()
+		cb_ui = ui_normal
+	end
+
+	if invest_button(2, 250, "UPGRADE RANGE (250)") then
+		cb_ui = ui_place_guard
+		guard_upgrade_range()
+		cb_ui = ui_normal
+	end
+
+	if invest_button(3, 250, "UPGRADE FIRE RATE (250)") then
+		cb_ui = ui_place_guard
+		guard_upgrade_rate()
+		cb_ui = ui_normal
 	end
 
 	if draw_button(rect_buy_back_btn, "Back") then
@@ -299,7 +364,7 @@ function ui_place_guard()
 
 	if mpress then
 		local tile = tile_at(mx, my)
-		if tile // 16 == 5 or true then
+		if tile // 16 == 5 then
 			cb_ui = ui_normal
 			guard_new((mx // 8)*8, (my // 8)*8)
 		end
@@ -317,12 +382,28 @@ function cash_balance(amount)
 end
 
 function cash_fisical()
-	trace("FISCAL")
 	sfx(2)
 	cash = math.ceil(cash * 1.2)
 	cash_balance(-guard_count*40)
+	bandit_clear()
 end
-
+--}}}
+--{{{ MISC
+function build_tower()
+	local offset_a = {9, 6}
+	local offset_b = {0, 17}
+	for y = 0, 4 do
+		for x = 0, 2 do
+			local get = mget(
+				offset_b[1]+x,
+				offset_b[2]+y)
+			mset(
+				offset_a[1]+x,
+				offset_a[2]+y,
+				get)
+		end
+	end
+end
 --}}}
 --{{{ MAIN
 
@@ -338,11 +419,6 @@ function TIC()
 	t = t+1
 	fiscal = fiscal+1
 
-	if fiscal >= 600 then
-		fiscal = 0
-		cash_fisical()
-	end
-
 	map(0, 0, 30, 17, 0, 0)
 
 	local mfpress
@@ -350,7 +426,10 @@ function TIC()
 	mpress = (mhold == false) and mfpress
 	mhold = mfpress
 
-	bandit_tic()
+	if bandit_tic() then
+		cash_fisical()
+	end
+
 	tic_actors()
 	lines_tic()
 	cb_ui()
