@@ -49,6 +49,10 @@ function tic_actors()
 			if a.next_tic <= 0 then
 				a.next_tic = a.tic(a)
 			end
+		elseif
+			if a.next_tic <= 0 then
+				-- TODO delete
+			end
 		end
 
 		spr(a.spr, a.x, a.y, 0)
@@ -70,10 +74,11 @@ function bandit_new(x, y)
 		a.y = a.y + a.dy
 
 		local at_row = mget(
-			(a.x+4)//8,
-			(a.y+4)//8) // 16
+		(a.x+4)//8,
+		(a.y+4)//8) // 16
 		if at_row == 5 or at_row == 6 then
 			a.dead = true
+			a.next_tic = 0
 			a.spr = 0
 			cash_steal(100)
 		end
@@ -82,6 +87,7 @@ function bandit_new(x, y)
 	end, x, y)
 
 	a.spr = 272
+	a.health = 3
 	a.t = 0
 	a.next_tic = 40
 
@@ -91,6 +97,16 @@ function bandit_new(x, y)
 	local r_inv = 1.0 / math.sqrt(a.dx*a.dx + a.dy*a.dy)
 	a.dx = a.dx * r_inv * 0.3
 	a.dy = a.dy * r_inv * 0.3
+end
+
+function bandit_hit(a, damage)
+	a.health = a.health - damage
+	if a.health <= 0 then
+		a.dead = true
+		a.next_tic = 120
+		a.spr = 275
+		trace("DEAD")
+	end
 end
 
 function bandit_wave()
@@ -116,10 +132,9 @@ function guard_new(x, y)
 	local a = actor_add(actor_type_guard, function(a)
 		a.autoturn = a.autoturn-1
 
-		--if guard_attack(a) then
-			--return 30
-		--elseif a.autoturn <= 0 then
-		if a.autoturn <= 0 then
+		if guard_attack(a) then
+			return 30
+		elseif a.autoturn <= 0 then
 			a.autoturn = 3 + math.floor(math.random()*2)
 
 			if math.random() > 0.5 then
@@ -133,9 +148,9 @@ function guard_new(x, y)
 			elseif a.spr < 256 then
 				a.spr = 256 + 7
 			end
-
-			return 10
 		end
+
+		return 10
 	end, x, y)
 	a.spr = 256
 	a.autoturn = 0
@@ -145,24 +160,25 @@ function guard_new(x, y)
 end
 
 function guard_attack(g)
-	return false
-
-	--[[
 	for i, a in ipairs(actors) do
 		if a.type == actor_type_bandit and a.dead == false then
-			trace("SHOOT")
 			local dx = a.x - g.x
 			local dy = a.y - g.y
-			local angle = math.floor(
-				8 * math.atan2(dx, dy) + math.pi)
-			trace(angle)
+			--local angle = (4 - math.floor(
+			--2 * (math.atan2(dx, dy) + math.pi))) % 8
+			local angle = math.atan2(dx, dy) + math.pi
+			local frame_id = (4- math.floor(
+			8.0*angle / (math.pi*2)))%8
 
+			trace("SHOOT")
+			bandit_hit(a, 1)
+
+			g.spr = 256 + frame_id
 			return true
 		end
 	end
 
 	return false
-	]]--
 end
 
 function guard_get_at(x, y)
@@ -246,11 +262,11 @@ end
 
 function ui_place_guard()
 	draw_shadow_text("Place guard on top of building",
-		13, 13, 15)
+	13, 13, 15)
 
 	if mpress then
 		local tile = tile_at(mx, my)
-		if tile // 16 == 5 then
+		if tile // 16 == 5 or true then
 			cb_ui = ui_normal
 			guard_new((mx // 8)*8, (my // 8)*8)
 		end
