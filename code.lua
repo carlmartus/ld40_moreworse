@@ -4,6 +4,7 @@
 -- script: lua
 -- input:  mouse
 
+--{{{ HEADER
 cash = 200
 mpress = false
 mhold = false
@@ -24,6 +25,7 @@ rect_buy_back_btn = {15, 70, 30, 8}
 actor_type_bandit = 1
 actor_type_guard = 2
 
+--}}}
 --{{{ ACTORS
 actors = {}
 
@@ -43,19 +45,24 @@ end
 
 function tic_actors()
 	for i, a in ipairs(actors) do
+		local draw = true
+
 		if a.dead == false then
 			a.next_tic = a.next_tic - 1
 
 			if a.next_tic <= 0 then
 				a.next_tic = a.tic(a)
 			end
-		elseif
+		else
 			if a.next_tic <= 0 then
-				-- TODO delete
+				draw = false
+				table.remove(actors, i)
 			end
 		end
 
-		spr(a.spr, a.x, a.y, 0)
+		if draw then
+			spr(a.spr, a.x, a.y, 0)
+		end
 	end
 end
 --}}}
@@ -127,6 +134,25 @@ function bandit_tic()
 	end
 end
 --}}}
+--{{{ LINES
+lines = {}
+
+function lines_tic()
+	for i, l in ipairs(lines) do
+		line(l.x0, l.y0, l.x1, l.y1, l.color)
+		l.ttl = l.ttl - 1
+		if l.ttl <= 0 then
+			table.remove(lines, i)
+		end
+	end
+end
+
+function lines_add(x0, y0, x1, y1, col, duration)
+	table.insert(lines, #lines+1, {
+		x0=x0, y0=y0, x1=x1, y1=y1, color=col, ttl=duration,
+	})
+end
+--}}}
 --{{{ GUARD ACTOR
 function guard_new(x, y)
 	local a = actor_add(actor_type_guard, function(a)
@@ -170,7 +196,14 @@ function guard_attack(g)
 			local frame_id = (4- math.floor(
 			8.0*angle / (math.pi*2)))%8
 
-			trace("SHOOT")
+			local dist_inv = 1.0 / math.sqrt(dx*dx + dy*dy)
+
+			lines_add(
+				g.x+4 + dx*dist_inv*5,
+				g.y+4 + dy*dist_inv*5,
+				a.x+4,
+				a.y+4,
+				9, 5)
 			bandit_hit(a, 1)
 
 			g.spr = 256 + frame_id
@@ -291,6 +324,7 @@ function cash_fisical()
 end
 
 --}}}
+--{{{ MAIN
 
 function init()
 	sfx(0)
@@ -318,7 +352,9 @@ function TIC()
 
 	bandit_tic()
 	tic_actors()
+	lines_tic()
 	cb_ui()
 end
 
 init()
+--}}}
