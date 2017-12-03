@@ -7,6 +7,10 @@
 
 --{{{ HEADER
 colorspin = 0
+mpress = false
+mhold = false
+mx = 0
+my = 0
 
 actor_type_bandit = 1
 actor_type_guard = 2
@@ -16,11 +20,13 @@ stats_kills = 0
 stats_payrolled = 0
 stats_thefts = 0
 guard_count = 0
+--}}}
+--{{{ PRICES
 
 price_guard = 40
 price_upgrade_range = 100
-price_upgrade_rate = 100
-price_tower = 300
+price_upgrade_rate = 250
+price_tower = 700
 
 --}}}
 --{{{ ACTORS
@@ -94,7 +100,6 @@ function bandit_new(x, y)
 			a.spr = 0
 			sfx(3)
 			stats_thefts = stats_thefts+1
-			--trace("STEAL "..at_row..", "..a.x..", "..a.y)
 			cash_steal(100)
 		end
 
@@ -123,6 +128,7 @@ function bandit_hit(a, damage)
 		a.spr = 275
 		a.spr_rot = math.floor(math.random()*3.999)
 		a.spr_flip = math.floor(math.random()*3.999)
+		sfx(5)
 	end
 end
 
@@ -134,7 +140,8 @@ function bandit_wave()
 		y_start = 134
 	end
 
-	for i = 1, bandit_waves do
+	local count = bandit_waves + math.floor((quater*quater)/50)
+	for i = 1, count do
 		local x_start = math.random() * 240
 		bandit_new(x_start, y_start)
 	end
@@ -183,7 +190,7 @@ function lines_add(x0, y0, x1, y1, col, duration)
 	})
 end
 --}}}
---{{{ GUARD ACTOR
+--{{{ GUARD
 guard_count = 0
 guard_range = 90
 guard_rate = 25
@@ -195,6 +202,7 @@ function guard_new(x, y)
 		if guard_attack(a) then
 			return guard_rate + math.floor(math.random()*10)
 		elseif a.autoturn <= 0 then
+			a.last_target = nil
 			a.autoturn = 3 + math.floor(math.random()*2)
 
 			if math.random() > 0.5 then
@@ -214,35 +222,50 @@ function guard_new(x, y)
 	end, x, y)
 	a.spr = 256
 	a.autoturn = 0
+	a.last_target = nil
 
 	guard_count = guard_count + 1
 end
 
+function guard_shoot(g, a)
+	local dx = a.x - g.x
+	local dy = a.y - g.y
+	--local angle = (4 - math.floor(
+	--2 * (math.atan2(dx, dy) + math.pi))) % 8
+	local angle = math.atan2(dx, dy) + math.pi
+	local frame_id = (4- math.floor(
+	8.0*angle / (math.pi*2)))%8
+
+	local dist_inv = 1.0 / math.sqrt(dx*dx + dy*dy)
+
+	lines_add(
+	g.x+4 + dx*dist_inv*5,
+	g.y+4 + dy*dist_inv*5,
+	a.x+4,
+	a.y+4,
+	9, 5)
+	sfx(1, 20+12*math.floor(math.random()*2), 30, 1)
+	bandit_hit(a, 1)
+
+	g.spr = 256 + frame_id
+end
+
 function guard_attack(g)
+	if g.last_target and g.last_target.dead == false then
+		guard_shoot(g, g.last_target)
+		return true
+	else
+		g.last_target = nil
+	end
+
 	for i, a in ipairs(actors) do
 		if a.type == actor_type_bandit and a.dead == false then
 			local dx = a.x - g.x
 			local dy = a.y - g.y
 
 			if math.abs(dx)+math.abs(dy) < guard_range then
-				--local angle = (4 - math.floor(
-				--2 * (math.atan2(dx, dy) + math.pi))) % 8
-				local angle = math.atan2(dx, dy) + math.pi
-				local frame_id = (4- math.floor(
-				8.0*angle / (math.pi*2)))%8
-
-				local dist_inv = 1.0 / math.sqrt(dx*dx + dy*dy)
-
-				lines_add(
-					g.x+4 + dx*dist_inv*5,
-					g.y+4 + dy*dist_inv*5,
-					a.x+4,
-					a.y+4,
-					9, 5)
-				sfx(1)
-				bandit_hit(a, 1)
-
-				g.spr = 256 + frame_id
+				guard_shoot(g, a)
+				g.last_target = a
 				return true
 			end
 		end
@@ -415,7 +438,6 @@ end
 --}}}
 --{{{ CASH
 function cash_steal(amount)
-	trace("LOST "..amount.." CASH")
 	cash = cash-amount
 
 	cash_check_balance()
@@ -491,25 +513,25 @@ end
 
 --}}}
 --{{{ MAIN GAME
---cash, mpress, mhold, mx, my, t, game_time, house, cb_ui
+--cash, mhold, mx, my, t, game_time, house, cb_ui
 
 function main_init()
 	-- Default settings
 	cash = 300
-	mpress = false
-	mhold = false
-	mx = 0
-	my = 0
 	t = 0
 	game_time = 0
 	quater = 0
 	house = {152, 72}
 	cb_ui = nil
+	actors = {}
 
 	stats_kills = 0
 	stats_payrolled = 0
 	stats_thefts = 0
+
 	guard_count = 0
+	guard_range = 90
+	guard_rate = 25
 
 	done_tower = false
 	done_upgrade_range = false
@@ -535,11 +557,6 @@ function main_TIC()
 
 	map(0, 0, 30, 17, 0, 0)
 
-	local mfpress
-	mx, my, mfpress = mouse()
-	mpress = (mhold == false) and mfpress
-	mhold = mfpress
-
 	if bandit_tic() then
 		cash_quaterly()
 	end
@@ -560,8 +577,10 @@ splash_lines = {
 	{"the world. Each quater the fund grows by", 0, 0, 15},
 	{"25%! Nice! However, all the bandits in", 0, 0, 15},
 	{"the world knows about this.", 0, 0, 15},
+	{"If a bandit reaches your house, you", 0, 5, 15},
+	{"loose 100.", 0, 0, 15},
 
-	{"[ PRESS MOUSE TO START ]", 0, 30, 14},
+	{"[ PRESS MOUSE TO START ]", 0, 20, 14},
 }
 
 function splash_init()
@@ -573,13 +592,14 @@ function splash_init()
 		l[2] = 120 - print(l[1], -200, -200, 0) // 2
 	end
 
+	sfx(6, 14, 200, 1)
+
 	main_cb = splash_TIC
 end
 
 function splash_TIC()
 	cls(7)
 
-	local mx, my, mpress = mouse()
 	if mpress then
 		main_init()
 	else
@@ -592,10 +612,7 @@ function splash_TIC()
 		end
 
 		if timer_tick(countdown) then
-			if guard_count <= 0 then
-				--timer_restart_duration(countdown, 300)
-				splash_rand_guard()
-			elseif guard_count < 4 then
+			if guard_count < 4 then
 				splash_rand_guard()
 			end
 		end
@@ -605,7 +622,7 @@ function splash_TIC()
 end
 
 function splash_rand_guard()
-	guard_new(10 + math.random()*200, 80 + math.random()*20)
+	guard_new(10 + math.random()*200, 100 + math.random()*15)
 end
 --}}}
 --{{{ MAIN GAME OVER
@@ -622,7 +639,7 @@ function go_TIC()
 	draw_shadow_text("!!! GAME OVER !!!", 75, 20, 15)
 	draw_shadow_text("Cash: ", 70, 40, 15)
 	draw_shadow_text(cash, 101, 40, 6)
-	draw_shadow_text("Reached quater: "..go_quater, 70, 48, 15)
+	draw_shadow_text("Quater: "..go_quater, 70, 48, 15)
 	draw_shadow_text("Thefts: "..stats_thefts, 70, 60, 15)
 	draw_shadow_text("Bandits stopped: "..stats_kills, 70, 68, 15)
 	draw_shadow_text("Guard count: "..guard_count, 70, 76, 15)
@@ -630,7 +647,6 @@ function go_TIC()
 
 	draw_shadow_text("[ PRESS MOUSE TO RESTART ]", 50, 120, colorspin // 2)
 
-	local mx, my, mpress = mouse()
 	if mpress then
 		splash_init()
 	end
@@ -639,7 +655,6 @@ end
 --{{{ MAIN
 
 function init()
-	trace("GAME START")
 	splash_init()
 	--main_init()
 	--go_init(4)
@@ -647,6 +662,12 @@ end
 
 function TIC()
 	colorspin = (colorspin + 1) % 32
+
+	local mfpress
+	mx, my, mfpress = mouse()
+	mpress = (mhold == false) and mfpress
+	mhold = mfpress
+
 	main_cb()
 end
 
