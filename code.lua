@@ -3,20 +3,24 @@
 -- desc:   Protect!
 -- script: lua
 -- input:  mouse
+-- dofile("code.lua")
 
 --{{{ HEADER
-cash = 300
-mpress = false
-mhold = false
-mx = 0
-my = 0
-t = 0
-fiscal = 0
-house = {152, 72}
-cb_ui = nil
+colorspin = 0
 
 actor_type_bandit = 1
 actor_type_guard = 2
+payroll = 30
+
+stats_kills = 0
+stats_payrolled = 0
+stats_thefts = 0
+guard_count = 0
+
+price_guard = 40
+price_upgrade_range = 100
+price_upgrade_rate = 100
+price_tower = 300
 
 --}}}
 --{{{ ACTORS
@@ -58,12 +62,20 @@ function tic_actors()
 		end
 	end
 end
+
+function actor_is_taken(x, y)
+	for i, a in ipairs(actors) do
+		if a.type == actor_type_guard then
+			if a.x == x and a.y == y then
+				return true
+			end
+		end
+	end
+
+	return false
+end
 --}}}
 --{{{ BANDITS
-bandit_next = 400
-bandit_timer = 300
-bandit_waves = 0
-
 function bandit_new(x, y)
 	local a = actor_add(actor_type_bandit, function(a)
 		a.t = a.t+1
@@ -80,6 +92,9 @@ function bandit_new(x, y)
 			a.dead = true
 			a.next_tic = 0
 			a.spr = 0
+			sfx(3)
+			stats_thefts = stats_thefts+1
+			--trace("STEAL "..at_row..", "..a.x..", "..a.y)
 			cash_steal(100)
 		end
 
@@ -102,6 +117,7 @@ end
 function bandit_hit(a, damage)
 	a.health = a.health - damage
 	if a.health <= 0 then
+		stats_kills = stats_kills+1
 		a.dead = true
 		a.next_tic = 120
 		a.spr = 275
@@ -128,6 +144,7 @@ function bandit_tic()
 	bandit_timer = bandit_timer+1
 
 	if bandit_timer >= bandit_next then
+		bandit_clear()
 		bandit_timer = 0
 		bandit_wave()
 		return true
@@ -137,9 +154,12 @@ function bandit_tic()
 end
 
 function bandit_clear()
-	for i, a in ipairs(actors) do
-		if a.type == actor_type_bandit then
-			--table.delete(actors, i)
+	local i=1
+	while i <= #actors do
+		if actors[i].type == actor_type_bandit then
+			table.remove(actors, i)
+		else
+			i = i+1
 		end
 	end
 end
@@ -196,7 +216,6 @@ function guard_new(x, y)
 	a.autoturn = 0
 
 	guard_count = guard_count + 1
-	cash_balance(-50)
 end
 
 function guard_attack(g)
@@ -234,10 +253,12 @@ end
 
 function guard_upgrade_range()
 	guard_range = guard_range+20
+	done_upgrade_range = true
 end
 
 function guard_upgrade_rate()
 	guard_rate = guard_rate-10
+	done_upgrade_rate = true
 end
 
 function guard_get_at(x, y)
@@ -263,8 +284,10 @@ function tile_at(mx, my)
 	return mget(mx//8, my//8)
 end
 
-function draw_cash()
-	draw_shadow_text("CASH: "..cash, 160, 10, 13)
+function draw_status()
+	draw_shadow_text("Cash: "..cash, 160, 10, 10)
+	draw_shadow_text("Quater: "..quater, 160, 18, 10)
+	draw_shadow_text("Payroll: "..payroll*guard_count, 160, 26, 10)
 end
 
 function draw_rect(r)
@@ -299,11 +322,10 @@ function draw_button(r, text, afford)
 	return mouse_in and mpress
 end
 
-function invest_button(id, cost, text)
-	local r = {15, 25 + id*10, 90, 8}
-	local afford = cash-cost >= 0
+function invest_button(id, cost, text, already_done)
+	local r = {15, 25 + id*10, 140, 8}
+	local afford = cash-cost >= 0 and not already_done
 	if draw_button(r, text, afford) and afford then
-		cash = cash-cost
 		return true
 	else
 		return false
@@ -313,14 +335,21 @@ end
 --{{{ UI
 rect_invest_btn = {10, 120, 40, 8}
 
-rect_buy_area = {10, 10, 100, 100}
+rect_buy_area = {10, 10, 150, 100}
 rect_buy_guard_btn = {15, 25, 90, 8}
 rect_buy_tower_btn = {15, 35, 90, 8}
 rect_buy_back_btn = {15, 70, 30, 8}
+rect_cancel_btn = {15, 120, 40, 8}
 
 function ui_normal()
-	draw_cash()
+	draw_status()
 	local press = draw_button(rect_invest_btn, "INVEST")
+
+	if quater == 0 and guard_count <= 0 then
+		draw_shadow_text("You need guards!", 10, 80, 6)
+		draw_shadow_text("Click", 10, 88, 6)
+		draw_shadow_text("INVEST", 42, 88, colorspin // 2)
+	end
 
 	if press then
 		cb_ui = ui_invest
@@ -330,26 +359,29 @@ end
 function ui_invest()
 	draw_rect(rect_buy_area)
 	draw_shadow_text("Investors menu", 13, 13, 14)
-	draw_cash()
+	draw_status()
 
-	if invest_button(0, 30, "GUARD (30 + 40X)") then
+	if invest_button(0, 30, "GUARD ("..price_guard.." + "..payroll.."X)", false) then
 		cb_ui = ui_place_guard
 	end
 
-	if invest_button(1, 400, "EXTRA TOWER (400)") then
+	if invest_button(1, price_tower, "TOWER ("..price_tower..")", done_tower) then
 		build_tower()
+		cash_balance(-price_tower)
 		cb_ui = ui_normal
 	end
 
-	if invest_button(2, 250, "UPGRADE RANGE (250)") then
+	if invest_button(2, price_upgrade_range, "UPGRADE RANGE ("..price_upgrade_range..")", done_upgrade_range) then
 		cb_ui = ui_place_guard
 		guard_upgrade_range()
+		cash_balance(-price_upgrade_range)
 		cb_ui = ui_normal
 	end
 
-	if invest_button(3, 250, "UPGRADE FIRE RATE (250)") then
+	if invest_button(3, price_upgrade_rate, "UPGRADE FIRE RATE ("..price_upgrade_rate..")", done_upgrade_rate) then
 		cb_ui = ui_place_guard
 		guard_upgrade_rate()
+		cash_balance(-price_upgrade_rate)
 		cb_ui = ui_normal
 	end
 
@@ -360,14 +392,24 @@ end
 
 function ui_place_guard()
 	draw_shadow_text("Place guard on top of building",
-	13, 13, 15)
+	13, 13, colorspin // 2)
 
 	if mpress then
 		local tile = tile_at(mx, my)
 		if tile // 16 == 5 then
-			cb_ui = ui_normal
-			guard_new((mx // 8)*8, (my // 8)*8)
+			local x = (mx // 8)*8
+			local y = (my // 8)*8
+			if actor_is_taken(x, y) then
+			else
+				guard_new(x, y)
+				cash_balance(-price_guard)
+				cb_ui = ui_normal
+			end
 		end
+	end
+
+	if draw_button(rect_cancel_btn, "Cancel") then
+		cb_ui = ui_normal
 	end
 end
 --}}}
@@ -375,23 +417,34 @@ end
 function cash_steal(amount)
 	trace("LOST "..amount.." CASH")
 	cash = cash-amount
+
+	cash_check_balance()
 end
 
 function cash_balance(amount)
 	cash = cash+amount
+	cash_check_balance()
 end
 
-function cash_fisical()
+function cash_check_balance()
+	if cash < 0 then
+		go_init(quater)
+	end
+end
+
+function cash_quaterly()
 	sfx(2)
-	cash = math.ceil(cash * 1.2)
-	cash_balance(-guard_count*40)
-	bandit_clear()
+	cash = math.ceil(cash * 1.25)
+	local salleries = guard_count*payroll
+	cash_balance(-salleries)
+	stats_payrolled = stats_payrolled+salleries
+	quater = quater+1
 end
 --}}}
 --{{{ MISC
 function build_tower()
-	local offset_a = {9, 6}
-	local offset_b = {0, 17}
+	local offset_a = {9, 7}
+	local offset_b = {0, 20}
 	for y = 0, 4 do
 		for x = 0, 2 do
 			local get = mget(
@@ -403,21 +456,82 @@ function build_tower()
 				get)
 		end
 	end
+
+	done_tower = true
 end
 --}}}
---{{{ MAIN
+--{{{ TIMER
+-- This was added in the end =P of the coding part
 
-function init()
+function timer_new(ticks)
+	return {
+		duration=ticks,
+		ttl=ticks,
+	}
+end
+
+function timer_tick(timer)
+	timer.ttl = timer.ttl-1
+	if timer.ttl <= 0 then
+		timer_restart(timer)
+		return true
+	else
+		return false
+	end
+end
+
+function timer_restart(timer)
+	timer.ttl = timer.duration
+end
+
+function timer_restart_duration(timer, duration)
+	timer.duration = duration
+	timer.ttl = duration
+end
+
+--}}}
+--{{{ MAIN GAME
+--cash, mpress, mhold, mx, my, t, game_time, house, cb_ui
+
+function main_init()
+	-- Default settings
+	cash = 300
+	mpress = false
+	mhold = false
+	mx = 0
+	my = 0
+	t = 0
+	game_time = 0
+	quater = 0
+	house = {152, 72}
+	cb_ui = nil
+
+	stats_kills = 0
+	stats_payrolled = 0
+	stats_thefts = 0
+	guard_count = 0
+
+	done_tower = false
+	done_upgrade_range = false
+	done_upgrade_rate = false
+
+	bandit_next = 500
+	bandit_timer = 0
+	bandit_waves = 0
+
 	sfx(0)
 
 	cb_ui = ui_normal
 	--cb_ui = ui_invest
-	cb_ui = ui_place_guard
+	--cb_ui = ui_place_guard
+
+	main_cb = main_TIC
+	sync(false)
 end
 
-function TIC()
+function main_TIC()
 	t = t+1
-	fiscal = fiscal+1
+	game_time = game_time+1
 
 	map(0, 0, 30, 17, 0, 0)
 
@@ -427,12 +541,113 @@ function TIC()
 	mhold = mfpress
 
 	if bandit_tic() then
-		cash_fisical()
+		cash_quaterly()
 	end
 
 	tic_actors()
 	lines_tic()
 	cb_ui()
+end
+--}}}
+--{{{ MAIN SPLASH
+local countdown
+
+splash_lines = {
+	{"Bestfund inc.", 0, 10, 11},
+
+	{"As a small bank owner you have all your", 0, 10, 15},
+	{"capital in the best investment fund in", 0, 0, 15},
+	{"the world. Each quater the fund grows by", 0, 0, 15},
+	{"25%! Nice! However, all the bandits in", 0, 0, 15},
+	{"the world knows about this.", 0, 0, 15},
+
+	{"[ PRESS MOUSE TO START ]", 0, 30, 14},
+}
+
+function splash_init()
+	actors = {}
+
+	countdown = timer_new(300)
+
+	for i, l in ipairs(splash_lines) do
+		l[2] = 120 - print(l[1], -200, -200, 0) // 2
+	end
+
+	main_cb = splash_TIC
+end
+
+function splash_TIC()
+	cls(7)
+
+	local mx, my, mpress = mouse()
+	if mpress then
+		main_init()
+	else
+
+		local y = 0
+		for i, l in ipairs(splash_lines) do
+			y = y+l[3]
+			draw_shadow_text(l[1], l[2], y, l[4])
+			y = y+10
+		end
+
+		if timer_tick(countdown) then
+			if guard_count <= 0 then
+				--timer_restart_duration(countdown, 300)
+				splash_rand_guard()
+			elseif guard_count < 4 then
+				splash_rand_guard()
+			end
+		end
+	end
+
+	tic_actors()
+end
+
+function splash_rand_guard()
+	guard_new(10 + math.random()*200, 80 + math.random()*20)
+end
+--}}}
+--{{{ MAIN GAME OVER
+function go_init(reached)
+	sfx(4)
+	go_quater = reached
+
+	main_cb = go_TIC
+end
+
+function go_TIC()
+	cls(7)
+
+	draw_shadow_text("!!! GAME OVER !!!", 75, 20, 15)
+	draw_shadow_text("Cash: ", 70, 40, 15)
+	draw_shadow_text(cash, 101, 40, 6)
+	draw_shadow_text("Reached quater: "..go_quater, 70, 48, 15)
+	draw_shadow_text("Thefts: "..stats_thefts, 70, 60, 15)
+	draw_shadow_text("Bandits stopped: "..stats_kills, 70, 68, 15)
+	draw_shadow_text("Guard count: "..guard_count, 70, 76, 15)
+	draw_shadow_text("Total salaries payed: "..stats_payrolled, 70, 94, 15)
+
+	draw_shadow_text("[ PRESS MOUSE TO RESTART ]", 50, 120, colorspin // 2)
+
+	local mx, my, mpress = mouse()
+	if mpress then
+		splash_init()
+	end
+end
+--}}}
+--{{{ MAIN
+
+function init()
+	trace("GAME START")
+	splash_init()
+	--main_init()
+	--go_init(4)
+end
+
+function TIC()
+	colorspin = (colorspin + 1) % 32
+	main_cb()
 end
 
 init()
